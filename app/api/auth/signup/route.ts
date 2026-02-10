@@ -12,54 +12,50 @@ const signupSchema = z.object({
 export async function POST(request: NextRequest) {
 	try {
 		const body = await request.json();
-		const parsedCredentials = signupSchema.safeParse(body);
+		const validationResult = signupSchema.safeParse(body);
 
-		if (!parsedCredentials.success) {
+		if (!validationResult.success) {
+			const fieldErrors = validationResult.error.flatten().fieldErrors;
 			return NextResponse.json(
-				{
-					error: "Invalid input",
-					details: parsedCredentials.error.flatten().fieldErrors,
-				},
-				{ status: 400 }
+				{ error: "Invalid input", details: fieldErrors },
+				{ status: 400 },
 			);
 		}
 
-		const { email, password, name } = parsedCredentials.data;
+		const { email, password, name } = validationResult.data;
 
-		// Check if user already exists
+		// Check for existing user
 		const existingUser = await prisma.user.findUnique({
-			where: { email },
+			where: { email: email.toLowerCase() },
 		});
 
 		if (existingUser) {
 			return NextResponse.json(
 				{ error: "User with this email already exists" },
-				{ status: 409 }
+				{ status: 409 },
 			);
 		}
 
-		// Hash the password
+		// Hash password and create user
 		const hashedPassword = await hash(password, 12);
+		const userData = {
+			email: email.toLowerCase(),
+			password: hashedPassword,
+			name: name || null,
+			onboardingCompleted: false,
+		};
 
-		// Create new user
-		const newUser = await prisma.user.create({
-			data: {
-				email,
-				password: hashedPassword,
-				name: name || null,
-				onboardingCompleted: false,
-			},
-		});
+		const newUser = await prisma.user.create({ data: userData });
 
-		// Return user without password
-		const { password: _, ...userWithoutPassword } = newUser;
+		// Remove password from response
+		const { password: _, ...safeUserData } = newUser;
 
 		return NextResponse.json(
 			{
 				message: "User created successfully",
-				user: userWithoutPassword,
+				user: safeUserData,
 			},
-			{ status: 201 }
+			{ status: 201 },
 		);
 	} catch (error) {
 		console.error("Signup error:", error);
