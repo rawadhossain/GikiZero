@@ -2,31 +2,32 @@ import { withAuth } from "next-auth/middleware";
 import { NextResponse } from "next/server";
 
 export default withAuth(
-	async function middleware(req) {
-		const token = req.nextauth.token;
-		const pathname = req.nextUrl.pathname;
+	function middleware(req) {
+		const { token } = req.nextauth;
+		const { pathname } = req.nextUrl;
 
-		// Allow access to public routes
+		// Public routes - allow immediate access
 		if (pathname === "/" || pathname.startsWith("/api/auth")) {
 			return NextResponse.next();
 		}
 
-		// If user is authenticated and tries to access auth pages, redirect to appropriate page
+		// Handle authenticated users attempting to access auth pages
 		if (pathname.startsWith("/auth") && token) {
-			if (!token.onboardingCompleted) {
+			const redirectUrl = token.onboardingCompleted ? "/dashboard" : "/onboarding";
+			return NextResponse.redirect(new URL(redirectUrl, req.url));
+		}
+
+		// Enforce onboarding completion
+		if (token) {
+			const hasCompletedOnboarding = token.onboardingCompleted;
+
+			if (!hasCompletedOnboarding && !pathname.startsWith("/onboarding")) {
 				return NextResponse.redirect(new URL("/onboarding", req.url));
 			}
-			return NextResponse.redirect(new URL("/dashboard", req.url));
-		}
 
-		// If user is authenticated but hasn't completed onboarding
-		if (token && !token.onboardingCompleted && !pathname.startsWith("/onboarding")) {
-			return NextResponse.redirect(new URL("/onboarding", req.url));
-		}
-
-		// If user has completed onboarding but tries to access onboarding page
-		if (token && token.onboardingCompleted && pathname.startsWith("/onboarding")) {
-			return NextResponse.redirect(new URL("/dashboard", req.url));
+			if (hasCompletedOnboarding && pathname.startsWith("/onboarding")) {
+				return NextResponse.redirect(new URL("/dashboard", req.url));
+			}
 		}
 
 		return NextResponse.next();
@@ -34,25 +35,21 @@ export default withAuth(
 	{
 		callbacks: {
 			authorized: ({ token, req }) => {
-				const pathname = req.nextUrl.pathname;
+				const { pathname } = req.nextUrl;
+				const publicPaths = ["/", "/auth", "/api/auth"];
 
-				// Allow access to public routes
-				if (
-					pathname === "/" ||
-					pathname.startsWith("/auth") ||
-					pathname.startsWith("/api/auth")
-				) {
-					return true;
-				}
+				// Check if current path is public
+				const isPublicPath = publicPaths.some(
+					(path) => pathname === path || pathname.startsWith(`${path}/`),
+				);
 
-				// For all other routes, require authentication
-				return !!token;
+				return isPublicPath || !!token;
 			},
 		},
 		pages: {
 			signIn: "/auth/signin",
 		},
-	}
+	},
 );
 
 export const config = {
